@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# Copyright (C) 2016 Dream Property GmbH
+#
+
+source librecovery
+
+FILENAME=${RECOVERY_CACHE}/settings.tar.gz
+
+usage()
+{
+	echo "Usage: ${0} [-hqtv] [<settings.tar.gz>]"
+	echo "       Default: ${FILENAME}"
+	exit ${1}
+}
+
+xgetopts $@
+
+shift $((${OPTIND} - 1))
+[ "$#" -le 1 ] || usage 1
+[ "$#" -eq 0 ] || FILENAME=`xrealpath ${1}`
+
+assert_rescue_mode
+create_workspace
+
+if is_beneath_directory "${FILENAME}" "${DATA_MOUNTPOINT}"; then
+	safe_mount "${DATA_PARTITION}" "${DATA_MOUNTPOINT}" -o ro || abort "Failed to mount data filesystem"
+fi
+safe_mount "${ROOT_PARTITION}" "${ROOT_MOUNTPOINT}" || abort "Failed to mount root filesystem"
+
+extract_tarball "${FILENAME}" . -v tmp/.recovery || abort "Failed to extract settings"
+
+if [ -f "tmp/.recovery/backup-paths.bak" ]; then
+	info "Deleting files and directories contained in backup"
+	IFS=$'\n'
+	set -- $(cat tmp/.recovery/backup-paths.bak)
+	unset IFS
+	for path; do
+		rm -rfv "${ROOT_MOUNTPOINT}${path}"
+	done
+fi
+
+info "Restoring configuration files"
+extract_tarball "${FILENAME}" "${ROOT_MOUNTPOINT}" -v --exclude=tmp/.recovery
+
+if [ -f "tmp/.recovery/pwhash-root.bak" -a -f "${ROOT_MOUNTPOINT}/etc/shadow" ]; then
+	info "Restoring root password"
+	PWHASH=$(cat "tmp/.recovery/pwhash-root.bak")
+	sed -e "s,^\(root:\)[^:]*\(:.*\),\1${PWHASH}\2," -i "${ROOT_MOUNTPOINT}/etc/shadow"
+fi
+if [ -f "tmp/.recovery/packages.bak" -a -d "${ROOT_MOUNTPOINT}/etc/enigma2" ]; then
+	info "Saving list of installed packages"
+	cp -av "tmp/.recovery/packages.bak" "${ROOT_MOUNTPOINT}/etc/enigma2/packages.bak"
+fi

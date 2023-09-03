@@ -1,0 +1,132 @@
+#!/bin/sh
+#
+# Copyright (C) 2019 Dream Property GmbH
+#
+
+source librecovery
+
+case "${MACHINE}" in
+	one|two|seven)
+		DEVICETREE=/boot/dream${MACHINE}.dtb
+		CMDLINE=
+		INITRD=
+		OPTSTRING="c:d:hi:qtv"
+		;;
+esac
+
+create_blob()
+{
+	ARGS="-m ${MEM_SIZE} -o ${1}"
+	INDEX=0
+	IFS=:
+	for FILE in ${ARC_IMAGES}; do
+		if is_readable_file "${FILE}"; then
+			ARGS="${ARGS} -f ${FILE} -t arc -i ${INDEX}"
+			INDEX=$((${INDEX} + 1))
+		fi
+	done
+	unset IFS
+	if is_readable_file "${INITRD}"; then
+		ARGS="${ARGS} -f ${INITRD} -t initrd"
+	fi
+	if ! is_empty "${CMDLINE}"; then
+		echo -n "${CMDLINE}" > cmdline.txt
+		ARGS="${ARGS} -f cmdline.txt -t cmdline"
+	fi
+	ARGS="${ARGS} -f ${VMLINUX} -t kernel -d 0x1000"
+
+	info "Creating boot image"
+	mkbootblob ${ARGS} >&3 2>&4
+}
+
+create_bootimg()
+{
+	ARGS="--base 0 --kernel_offset 0x1080000 --second_offset 0x1000000 -o ${1}"
+
+	ARGS="${ARGS} --kernel ${VMLINUX}"
+	if is_readable_file "${DEVICETREE}"; then
+		ARGS="${ARGS} --second ${DEVICETREE}"
+	fi
+	if is_readable_file "${INITRD}"; then
+		ARGS="${ARGS} --ramdisk ${INITRD}"
+	fi
+	ARGS="${ARGS} --board ${MACHINE}"
+
+	info "Creating boot image - cmdline=${CMDLINE}"
+	if is_empty "${CMDLINE}"; then
+		mkbootimg ${ARGS} >&3 2>&4
+	else
+		if is_gpt; then
+			CMDLINE=$(echo ${CMDLINE} | sed -e "s/mmcblk0p7/${CMDLINE_ROOTFS}/g")
+		fi
+		info "Kernel command-line: ${CMDLINE}"
+		mkbootimg ${ARGS} --cmdline "${CMDLINE}" >&3 2>&4
+	fi
+}
+
+write_blob()
+{
+	case "${3}" in
+		A)
+			write_lba "${1}" "${2}" 16384
+			;;
+		B)
+			write_lba "${1}" "${2}" 81920
+			;;
+	esac
+}
+
+usage()
+{
+	echo "Usage: ${0} [-hqtv] [-c <cmdline>] [-d <devicetree>] [-i <initrd>] <vmlinux.bin>"
+	echo "       Default: -d ${DEVICETREE}"
+	exit ${1}
+}
+
+while getopts ${OPTSTRING} opt; do
+	case "${opt}" in
+		a)
+			ARC_IMAGES="${OPTARG}"
+			;;
+		c)
+			CMDLINE="${OPTARG}"
+			;;
+		d)
+			DEVICETREE="${OPTARG}"
+			;;
+		i)
+			INITRD="${OPTARG}"
+			;;
+		m)
+			MEM_SIZE="${OPTARG}"
+			;;
+		o)
+			OPTION="${OPTARG}"
+			;;
+	esac
+	std_opt "${opt}"
+done
+
+shift $((${OPTIND} - 1))
+[ "$#" -eq 1 ] || usage 1
+VMLINUX=`xrealpath ${1}`
+
+! is_empty "${VMLINUX}" || abort "No kernel image given"
+is_readable_file "${VMLINUX}" || abort "Cannot access '${VMLINUX}'"
+is_file_size_le "${VMLINUX}" "${KERNEL_SIZE}" || abort "Kernel image is too big"
+
+DEVICE=${KERNEL_PARTITION:-${FLASH_DEVICE}}
+is_writable_blockdev "${DEVICE}" || is_writable_chardev "${DEVICE}" || abort "Target device '${DEVICE}' is not writable"
+
+case "${MACHINE}" in
+	one|two|seven)
+		create_workspace
+		if is_gpt; then
+			create_bootimg "/boot/kernel.img" || abort "Failed to create boot image"
+		else
+			create_bootimg bootblob.bin || abort "Failed to create boot image"
+			is_file_size_le bootblob.bin "${KERNEL_SIZE}" || abort "Boot image is too big"
+			write_blkdev bootblob.bin "${KERNEL_PARTITION}" || abort "Failed to flash boot image"
+		fi
+		;;
+esac

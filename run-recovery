@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# Copyright (C) 2016 Dream Property GmbH
+#
+
+source librecovery
+
+BASE_URI=http://dreamboxupdate.com/download/recovery/${MACHINE}/release
+FILENAME=recovery
+
+while getopts bhqrtv opt; do
+	std_opt "${opt}"
+done
+assert_rescue_mode
+create_workspace
+create_keyring "${RECOVERY_KEY}"
+
+mount_cache
+fetch_signed "${BASE_URI}" "${FILENAME}"
+update_cache_signed "${FILENAME}"
+unmount_cache
+
+run "./${FILENAME}" $@

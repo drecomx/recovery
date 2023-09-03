@@ -1,0 +1,890 @@
+#
+# Copyright (C) 2019 Dream Property GmbH
+#
+
+PART_ROOT=/dev
+ROOT_MOUNTPOINT=/mnt
+ROOT_NAME=dreambox-rootfs
+CMDLINE_ROOTFS=
+DATA_MOUNTPOINT=/data
+DATA_NAME=dreambox-data
+RECOVERY_CACHE=${DATA_MOUNTPOINT}/.recovery
+LEGACY=false
+PARTITION_TABLE=
+MOUNTPOINTS=
+WORKSPACE=
+
+set -e
+
+exec 3>/dev/null
+exec 4>&2
+exec 5>&1
+
+librecovery_init()
+{
+	if [ -f /proc/stb/info/mid ]; then
+		read MID </proc/stb/info/mid || true
+	else
+		warn "Could not read MID!"
+		mark_legacy_version
+	fi
+
+	eval `tpm-ca 2>/dev/null | grep '^CA_[A-Z]\+=[A-Z0-9:_-]\+$'`
+	if [ -z "$CA_MID" ]; then
+		warn "Could not read CA!"
+		mark_legacy_version
+	elif [ "$MID" != "$CA_MID" ]; then
+		if [ -n "$MID" ]; then
+			warn "Detected incompatible drivers!"
+		fi
+		MID="$CA_MID"
+	fi
+
+	case "$MID" in
+		24)
+			MACHINE="one"
+			;;
+		25)
+			MACHINE="two"
+			;;
+		26)
+			MACHINE="seven"
+			;;
+		*)
+			[ -f /proc/stb/info/model ] || abort "Unsupported machine!"
+			read MACHINE </proc/stb/info/model
+			;;
+	esac
+
+	case "$MACHINE" in
+		one)
+			RECOVERY_KEY="
+				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
+			"
+			;;
+		two)
+			RECOVERY_KEY="
+				mDMEXjg39BYJKwYBBAHaRw8BAQdAPDcDM+3IlbNMr6xDDSQKQi1GAcANi3tXo0UgppXDKz60MERy
+				ZWFtYm94IFR3byBSZWNvdmVyeSA8dHdvQHJlY292ZXJ5LmRyZWFtYm94LmRlPoiQBBMWCAA4FiEE
+				s51t5UgCNC6ib8sWw2DRqxVPUwwFAl44N/QCGwMFCwkIBwIGFQgJCgsCBBYCAwECHgECF4AACgkQ
+				w2DRqxVPUwzK1gD+KqCtHCP5W8rSVCwapmxt8bj6LKq8BFLQnVuM+KNKdIMA/1LDdRnHVxvlpkgZ
+				PZ+5r7RO7zGnW+GeZX4vLdYrAsgFuDgEXjg39BIKKwYBBAGXVQEFAQEHQJtoMmpzXB+zmjYDtxjH
+				IeWW8gpJZ7rJKbsAMgK8kcFcAwEIB4h4BBgWCAAgFiEEs51t5UgCNC6ib8sWw2DRqxVPUwwFAl44
+				N/QCGwwACgkQw2DRqxVPUww5xwEA5VKZFPtJvHJDgbVlq1JaoVwJlOEwSUqf98bdGF8xgyYBAOpb
+				xmIzYBiNvwwgAWvVc6Di8fkwhnP4mJlxsUoWMSsN
+			"
+			;;
+		seven)
+			RECOVERY_KEY="
+			"
+			;;
+		*)
+			abort "Unsupported machine!"
+			;;
+	esac
+
+	case "$MACHINE" in
+		one|two|seven)
+			FLASH_DEVICE="/dev/mmcblk0"
+			FILESYSTEM="ext4"
+
+			set_device_paths || abort "Device path setup failed!"
+
+			UBOOT_SIZE=$((4 * 1024 * 1024))
+			KERNEL_SIZE=$((32 * 1024 * 1024))
+			RESCUE_SIZE=$((32 * 1024 * 1024))
+			PARTED_ARGS="mkpart primary ext4 4MB 116MiB
+							name 1 u-boot-reserved
+							mkpart primary ext4 116MiB 132MiB
+							name 2 u-boot-env
+							mkpart primary ext4 132MiB 256MiB
+							name 3 recovery
+							mkpart primary ext4 256MiB 8GiB
+							name 4 dreambox-data
+							mkpart primary ext4 8GiB 10GiB
+							name 5 dreambox-rootfs
+							mkpart primary ext4 10GiB 12GiB
+							name 6 dreambox-rootfs-1"
+			;;
+	esac
+
+	case "$MACHINE" in
+		one|two|seven)
+			POSTINSTS="dreambox-bootlogo-u-boot kernel-image"
+			;;
+	esac
+}
+
+set_device_paths()
+{
+	UBOOT_PARTITION_LEGACY="/dev/bootloader"
+	if is_gpt; then
+		PART_ROOT="/dev/disk/by-partlabel"
+		KERNEL_PARTITION="/dev/null"
+		UBOOT_PARTITION="${FLASH_DEVICE}boot0"
+		CMDLINE_ROOTFS="mmcblk0p5"
+	else
+		info "legacy"
+		PART_ROOT="/dev"
+		KERNEL_PARTITION="/dev/boot"
+		UBOOT_PARTITION="/dev/bootloader"
+	fi
+
+	RESCUE_PARTITION="${PART_ROOT}/recovery"
+	ROOT_PARTITION="${PART_ROOT}/${ROOT_NAME}"
+	DATA_PARTITION="${PART_ROOT}/${DATA_NAME}"
+}
+
+is_beneath_directory()
+{
+	local file=`xrealpath ${1}`
+	local dir=`xrealpath ${2}`
+
+	case "$file" in
+		$dir/*)
+			true
+			;;
+		*)
+			false
+			;;
+	esac
+}
+
+is_gpt()
+{
+	PARTITION_TABLE=`parted $FLASH_DEVICE print 2>&1 | grep Partition | awk '{print $3}'`
+	[ $PARTITION_TABLE = "gpt" ]
+}
+
+is_gpt_uboot()
+{
+	case "$MACHINE" in
+		one|two|seven)
+			;;
+		*)
+			false
+			return
+			;;
+	esac
+
+	local bad_uboot_sizes="1652736 1655296"
+
+	for size in ${bad_uboot_sizes}; do
+		local bl_hash=$(dd "if=${UBOOT_PARTITION}" "bs=$((${size} + 512))" count=1 2>/dev/null | dd skip=1 2>/dev/null | sha256sum | awk '{print $1}')
+		case "$bl_hash" in
+			1938acdc29f2639f9b8bafc13ecb43c3d0c065ee3768b64b285d7d911ce1597d|c1c8f9a48b573198bc498698bc9c44eef5d0394bb84bb37ef59195853d012b1f|430990893f1de7984a017767ab6bc4a9086ed429a45d15930ace1773914c7fda)
+				false
+				return
+				;;
+		esac
+	done
+	true
+}
+
+is_blockdev()
+{
+	[ -b "${1}" ]
+}
+
+is_chardev()
+{
+	[ -c "${1}" ]
+}
+
+is_directory()
+{
+	[ -d "${1}" ]
+}
+
+is_file()
+{
+	[ -f "${1}" ]
+}
+
+is_readable()
+{
+	[ -r "${1}" ]
+}
+
+is_readable_blockdev()
+{
+	is_blockdev "${1}" && is_readable "${1}"
+}
+
+is_readable_file()
+{
+	is_file "${1}" && is_readable "${1}"
+}
+
+is_writable()
+{
+	[ -w "${1}" ]
+}
+
+is_writable_blockdev()
+{
+	is_blockdev "${1}" && is_writable "${1}"
+}
+
+is_writable_chardev()
+{
+	is_chardev "${1}" && is_writable "${1}"
+}
+
+is_writable_directory()
+{
+	is_directory "${1}" && is_writable "${1}"
+}
+
+is_empty()
+{
+	[ -z "${1}" ]
+}
+
+is_file_size_le()
+{
+	[ "`stat -c '%s' ${1}`" -le "${2}" ]
+}
+
+is_initrd()
+{
+	is_file "/etc/initrd-release"
+}
+
+is_nfsroot()
+{
+	is_readable_file /proc/cmdline && grep -q -w root=/dev/nfs /proc/cmdline
+}
+
+is_mountpoint()
+{
+	is_directory "${1}" && mountpoint -q `realpath "${1}"`
+}
+
+is_empty_or_mountpoint()
+{
+	is_empty "${1}" || is_mountpoint "${1}"
+}
+
+is_mounted()
+{
+	if is_blockdev "${1}"; then
+		is_mountpoint "${2}" && [ `mountpoint -x "${1}"` = `mountpoint -d "${2}"` ]
+	else
+		is_mountpoint "${2}" && grep -q "^${1}\s${2}\s" /proc/mounts
+	fi
+}
+
+cleanup()
+{
+	IFS=:
+	for dir in ${MOUNTPOINTS}; do
+		unmount "${dir}"
+	done
+	unset IFS
+
+	is_empty "${WORKSPACE}" || rm -rf "${WORKSPACE}"
+}
+
+abort()
+{
+	echo "Fatal: $@"
+	exit 1
+}
+
+warn()
+{
+	echo "Warning: $@" >&5
+}
+
+info()
+{
+	echo "[*] $@" >&5
+}
+
+create_directory()
+{
+	if ! is_directory "${1}"; then
+		info "Creating directory '${1}'"
+		mkdir -p "${1}" >&3 2>&4
+	fi
+}
+
+create_filesystem()
+{
+	info "Creating ${FILESYSTEM} filesystem '${1}' on ${2}"
+	xtrap mkfs.${FILESYSTEM} -F -L "${1}" "${2}"
+}
+
+blkdev_has_filesystem()
+{
+	is_blockdev "${1}" && (
+		if hash blkid 2>/dev/null; then
+			blkid -o export "${1}" | grep -q "^TYPE=${FILESYSTEM}$"
+		else
+			mark_legacy_version
+			local dir=`mktemp -d -p ${WORKSPACE}` || abort 'Failed to create temporary mount point'
+			grep -q "^${1}\s[^\s]\+\s${FILESYSTEM}\s" /proc/mounts || (mount -t ${FILESYSTEM} -o ro "${1}" "${dir}" 2>/dev/null && umount "${dir}")
+		fi
+	)
+}
+
+create_nand_filesystem()
+{
+	info "Creating ${FILESYSTEM} filesystem on ${1}"
+	xtrap mkfs.${FILESYSTEM} "${1}"
+}
+
+erase()
+{
+	info "Erasing flash memory on ${1}"
+	xtrap flash_erase "${1}" 0 0
+}
+
+write_nand()
+{
+	info "Writing to NAND memory on ${1}"
+	xtrap nandwrite -p -m "${1}" "${2}"
+}
+
+create_partition_table()
+{
+	info "Creating partition table"
+	if is_gpt_uboot; then
+		if $2; then
+			info "Creating GPT for multiboot u-boot"
+			create_gpt_partition_table $1
+		else
+			info "No GPT creation requested, skipping!"
+		fi
+		return
+	fi
+
+	[ -n "${SGDISK_ARGS}" ] || abort "Can't create partition without SGDISK_ARGS."
+	if hash sgdisk 2>/dev/null; then
+		xtrap sgdisk -Z "${1}" || true
+		xtrap sgdisk ${SGDISK_ARGS} "${1}"
+	else
+		mark_legacy_version
+		xtrap parted --script --align=optimal "${1}" -- mklabel gpt ${PARTED_ARGS}
+	fi
+}
+
+clone_uboot()
+{
+	[ -e /dev/${UBOOT_PARTITION_LEGACY} ] || abort "No legacy u-boot partition found (${UBOOT_PARTITION_LEGACY})!"
+	[ -e /dev/${UBOOT_PARTITION} ] || abort "No u-boot partition found (${UBOOT_PARTITION})!"
+	write_lba "${UBOOT_PARTITION_LEGACY}" "${UBOOT_PARTITION}" 0
+}
+
+create_gpt_partition_table()
+{
+	if ! is_gpt; then
+		UBOOT_PARTITION="${FLASH_DEVICE}boot0"
+		clone_uboot
+	fi
+	xtrap parted --script --align=optimal "${1}" -- mklabel gpt ${PARTED_ARGS}
+	set_device_paths
+}
+
+
+
+create_bootmenu()
+{
+	if ! is_gpt; then
+		echo "No GPT found, so no bootmenu.txt is required!"
+		false;
+		return;
+	fi
+	safe_mount "${DATA_PARTITION}" "${DATA_MOUNTPOINT}" || abort "Failed to mount data filesystem"
+	local bootconfig="${DATA_MOUNTPOINT}/bootconfig.txt"
+	info "Generating '${bootconfig}'"
+	echo "details=0" > $bootconfig
+	echo "timeout=1" >> $bootconfig
+	echo "fb_pos=100,400" >> $bootconfig
+	echo "fb_size=1080,300" >> $bootconfig
+	echo "[Dreambox Image]" >> $bootconfig
+	echo "cmd=ext4load mmc 1:5 1080000 /boot/kernel.img;bootm;" >> $bootconfig
+	echo "arg=\${bootargs}" >> $bootconfig
+	echo "[Dreambox Recovery]" >> $bootconfig
+	echo "cmd=imgread kernel recovery \${loadaddr} 0; bootm \${loadaddr};" >> $bootconfig
+	echo "arg=\${bootargs}" >> $bootconfig
+}
+
+create_tarball()
+{
+	local sysroot="${1}"
+	local tarball="${2}"
+	local opt
+
+	case "${tarball}" in
+		*.tar)
+			opt=""
+			;;
+		*.gz|*.tgz|*.taz)
+			opt="-z"
+			;;
+		*.Z|*.taZ)
+			opt="-Z"
+			;;
+		*.bz2|*.tbz|*.tbz2|*.tz2)
+			opt="-j"
+			;;
+		*.lz)
+			opt="--lzip"
+			;;
+		*.lzma|*.tlz)
+			opt="--lzma"
+			;;
+		*.lzo)
+			opt="--lzop"
+			;;
+		*.xz|*.txz)
+			opt="-J"
+			;;
+		*)
+			abort "Invalid file type: ${tarball}"
+			;;
+	esac
+
+	create_directory "`dirname ${tarball}`"
+
+	echo "${WORKSPACE:1}" >exclude.list
+	(cd "${sysroot}" && find . -type s) >>exclude.list
+
+	if [ $# -gt 2 ]; then
+		printf "" >include.list
+		IFS=$'\n'
+		set -- ${3}
+		unset IFS
+		for path; do
+			if [ -e "${sysroot}${path}" ]; then
+				echo "${path:1}" >>include.list
+			fi
+		done
+	else
+		echo "." >include.list
+	fi
+
+	info "Creating ${tarball} from ${sysroot}"
+	xtar -C "${sysroot}" ${opt} --exclude-from=exclude.list --files-from=include.list -cf "${tarball}.tmp"
+	mv "${tarball}.tmp" "${tarball}"
+}
+
+create_workspace()
+{
+	umask 077
+
+	WORKSPACE=`mktemp -d` || abort 'Failed to create working directory'
+	trap cleanup EXIT INT
+	cd "${WORKSPACE}" || abort 'Failed to change working directory'
+}
+
+extract_tarball()
+{
+	local tarball="${1}"
+	local dir="${2}"
+	shift 2
+
+	info "Extracting '${tarball}' to '${dir}'"
+	xtar -xf "${tarball}" -C "${dir}" $@
+}
+
+fetch()
+{
+	info "Downloading '${1}/${2}'"
+	if hash curl 2>/dev/null; then
+		curl -q "${1}/${2}" -o "${2}" >&3 2>&4
+	else
+		wget -q "${1}/${2}" -O "${2}" >&3 2>&4
+	fi
+}
+
+create_keyring()
+{
+	export GNUPGHOME="${WORKSPACE}"
+	echo "${1}" | sed -e 's,\s\+,,g' -e '/^$/d' | base64 -d > trustedkeys.gpg || abort 'Failed to write public key'
+}
+
+create_keyring_for_uri()
+{
+	KEY_DORA="
+		mQENBFQa0QwBCACe+mzu7j7Gc4Ew4XUK1b84lgv2ABXCeZqBBQtgat5f9zbPCClEoNBz6csWND0z
+		x/km+YxPSfF7eYeSPjY6GifiduhkxQP/7oqyhzlW54ZwoCRgVGyzhir5oCszXQm3TvDYoqakrBNS
+		bJ4rNoaDqdA5RdEtvBEIHH33iJakD+7pUYEkPcXZiwV7R2hA3kfiwSjIVsmc5qI0u7KxBgkerBg7
+		DkImwzxd2jim1hUvZYSjz/u5dL/AwL/gPSEI/8UqnU7wuuT01UlJ1bFOQtnYi24aoC0Yr7bHQOwm
+		CIvHSyaKLzU5UWj0nVmN6bmcpUKzonYtD4y4UtqNlleK4K/9F9EhABEBAAG0R29wZW5kcmVhbWJv
+		eCByZXBvc2l0b3J5IHNpZ25pbmcga2V5ICgyLjIpIDxyZXBvc2l0b3J5QG9wZW5kcmVhbWJveC5v
+		cmc+iQE3BBMBCgAhBQJUGtEMAhsDBQsJCAcDBRUKCQgLBRYDAgEAAh4BAheAAAoJEI4TTvLqUk9F
+		8doH/1nhb/sXXTdTqBe0Az/aLUJdSO9akuJHTisSXoF1CZnADgIOYhJRVzBGDLEBqqrTYDAJolQ2
+		Rec4+68fuEAIZ2ai2zWEIO9liGTQJMzNnaJpAaWmzy/8ur1aAOY5UY2fP6pJmjeoMHxr2swo5VJ8
+		DzRv6QASnaiai3trRRTwzmA60AM8eXYRNqXE2OCroC7Q//YHvi0nxvFC1trfffajvfz9kr949Sfx
+		HYJYsrIMu/JaYrAUkKkR/ZG3UgXth8tQpAUMBcus4kBjsLvF6eMtninkkqfhcW0wpabhI6ZZo/bQ
+		iUTgCbzU8P8qgOLed2yVo8VoMjDTRfKFexbhGh3+CzSwAgADuQENBFQa0QwBCAC654L/wqPPd/+F
+		3zND16SJhlvCXfHbkhzo3QsPfRudmcrSYuH32p2/qlaKzRn4ifTkWPokG67yZbQRkcb6lXqOEGmL
+		K5YM+IAox+7nkGlt1FcmDx6NPL7kEW5XvVzctILOYrljjqNmC6A+qdjZRGeeDUHILou7gH+QSp+1
+		UBjPnF2YF98GTFlKKw6CMuTaqDaica4iNu7aSO4TfM6tlZBM6bS/39dSWVeDgGls5xLySD12EB5d
+		QLRZl1HqZhKroJh7KFiK5gaEj5fnxpeZ0waKQzT1lq+U0n0pR1xu92Axpx7wyp07ka0nzQ9YESZI
+		LO8xOP7W7PtutFX5fOoX391/ABEBAAGJAR8EGAEKAAkFAlQa0QwCGwwACgkQjhNO8upST0WqFgf/
+		aaovcygJPQhcvCpHuM8KHLJFrkeKan5/M/QrELTlHc3cPmk+MyaweHGETaom3H9RSxPrXYXnma9H
+		g6a110mq4x2vzXsZXpemakctale+QTlhc28uumExR+MfBoghEkwpnWBpFCH41aDpNWasVhm686Pt
+		YXiVcacwZ6gX59CHmpkFZsBv8glONlowJ1ml1UKSR1ZYUTPnxi6VnEfbxlrfZgM4l2uG2CrexnKv
+		ZSFMBsY0WstRD8LIp2opYqvnNjox2o/Ko60n4shlYcys0vxZLrr19tsLlv5vtgAowMRWrs/HHlpx
+		i9iBdbf9gVNyLI5TG9vH9DwJ4IbhLE+XFAr5x7ACAAM=
+	"
+	KEY_KROGOTH="
+		mQENBFf2sl4BCADLOA4VixBkeZahH8JDHH5MzJllK0OSmWBsK0LPBD3DPc+nci5lceDzY1HuHpG6
+		iqpkCU8Dsr9TYfpLjLBMUoAOXDxcdU/GVQ1U3Of/1fhG+ZNb2GhiP4vR9omPeujkKmmcgaViR9ia
+		px/DIcMCnx95WgZ4KBTH9OGgrYI0jHaBi4RcJPzDyNB/B8p/tMEx2PRXjecubr3FPY+bJDR3bPLS
+		sjgU6Gj6VHRz90couUJQ70ZayXUSAEB0Xu6NhszjOKWZO52PD+nLe5KUkVYCi2h9/XX/h1m4Cfg9
+		NEMy6UpCl86cA6LGuFQ+cTkfaGLkCUYHlWDBeo7AVsYnj+lQuWnfABEBAAG0R29wZW5kcmVhbWJv
+		eCByZXBvc2l0b3J5IHNpZ25pbmcga2V5ICgyLjUpIDxyZXBvc2l0b3J5QG9wZW5kcmVhbWJveC5v
+		cmc+iQE4BBMBAgAiBQJX9rJeAhsDBgsJCAcDAgYVCAIJCgsEFgIDAQIeAQIXgAAKCRB7dL9J+iIE
+		59cEB/oDMdR5DqNMh6ZLdWWLMmtILw8SQ8S1nDsBVqm9uJYY6bM3WglPeAPR5GW21C/sCKVXHBI9
+		yIzvd3C8XnCP11rNHVOgN5fo7JMMPrZNvZr9mFP6mXBPvTjm5zlGZVPp33ajDANvjyRNwWeZOGI0
+		IEYmeKTt02lnncGwLyBfic06sp9Yz4e8qW2KVErEg9pWsakhxJzQrJRvMF9w9AzeIelQqcJEwd+v
+		PTFxW77/r+vQbinW8fKxPHMuVFkJiF9evfHyUDcLepe9Zgetve/Z73KIBjjk8PX5UAJqAKT0rNCc
+		kDLoJ9bq6USze9RQNmqEfA/Sr9P8ezkrzvsXftP3EnjPuQENBFf2sl4BCADMAna974PotpvcYMgR
+		1ch/71SljKqTZbsSVeamkdwSwmpxmeEfH5iIA3phaAAJ5OjVc7sSMX8EJU8nszIo7eIaO4aoQdgN
+		g86H7JVMBc4gGxQAfUPcp6oiKcyufZdz52xT8qyFmzpwiwVNg60I5eTRRHOdv14+SniipOG0jqNA
+		elHQm9BJwPh4ohRAgK8QOoPTitq/llSOnxZyX09LjMmtyUPtiCbH4OtKYAYcj5GsDVpb14+Tz4NC
+		B9tx/mEzfUGr5SpmKaorqSDMXxJZ6jtoFXUXTw2qjsLWESwHyVD6s4ugfDfsMQzMEIuSDzeGF6u0
+		E6ADndlf1W9Y+apyDUfFABEBAAGJAR8EGAECAAkFAlf2sl4CGwwACgkQe3S/SfoiBOdJ1wf+JXWL
+		w2E3rkObvzXdsfiO1VvS6YpTY5v6M4AtG+t5R9/gkMooYiCTWGrKTsIPttwKvaEE3CpX0tcFCPc/
+		n7hEiJD6xIhoXx1OJH52Svc4oOhHTmBCpuMtAvtBsBMm4OJg8tLDb7I/OXdpJT+YUNhxfs2+/u/3
+		75H8Mf2pUDfu58gHpaH6cHcRypRKJTWYuagBZ+jEKl1zpAkqQMPQxGET/wWhisZwwS680qBkL+iO
+		85jokbt9hbFYvvi6qM0WqkqN9wiIKAXlJn4Yri6sXlwGltTdfE72h7cWJfdi7wTLu1W1mVVBtsds
+		7fDteCBdzElW9pWpNlRWRu85cIBMBExCrQ==
+	"
+	KEY_PYRO="
+		mDMEXIpGFhYJKwYBBAHaRw8BAQdAqbBzp8+TZw3OJrKoexOyF/adeh5a5/AfJMRWBMZMAuq0R29w
+		ZW5kcmVhbWJveCByZXBvc2l0b3J5IHNpZ25pbmcga2V5ICgyLjYpIDxyZXBvc2l0b3J5QG9wZW5k
+		cmVhbWJveC5vcmc+iJAEExYIADgWIQTD0RAjJObu5yFZZzSpfPBj3HnAJwUCXIpGFgIbAwULCQgH
+		AgYVCAkKCwIEFgIDAQIeAQIXgAAKCRCpfPBj3HnAJ2ikAQDylvCPeCvNSFAtvQMzZFtArVZ8PgMt
+		hoeSWvXqurvF6AEA/lbzsSZk4XeSe8goEyPiom0ynCFvlJVYwUBaRgsoHgu4OARcikYWEgorBgEE
+		AZdVAQUBAQdAHuc8U4tr03xdlIYFXKQ4eWlqdCDDmacrmCUN4MJJOTYDAQgHiHgEGBYIACAWIQTD
+		0RAjJObu5yFZZzSpfPBj3HnAJwUCXIpGFgIbDAAKCRCpfPBj3HnAJ6TQAP4oM+ylt+f28hXm3n37
+		Qf7mPoS1fcaBmmIHHablqSFLKgEA2Lz86nq27kC3G17IdPQbh1QwS7aEcWxd2dxmlp+GWwg=
+	"
+
+	case "$1" in
+		*dreamboxupdate.com/opendreambox/2.2/*/${MACHINE}/*)
+			create_keyring "${KEY_DORA}"
+			;;
+		*dreamboxupdate.com/opendreambox/2.5/*/${MACHINE}/*)
+			create_keyring "${KEY_KROGOTH}"
+			;;
+		*dreamboxupdate.com/opendreambox/2.6/*/*/*)
+			create_keyring "${KEY_PYRO}"
+			;;
+		*)
+			create_keyring "${RECOVERY_KEY}"
+			;;
+	esac
+}
+
+verify()
+{
+	info "Verifying signature of '${1}'"
+	gpgv -q --ignore-time-conflict "${1}.sig" "${1}" >&3 2>&4
+}
+
+files_equal()
+{
+	cmp -s "${1}" "${2}"
+}
+
+fetch_signed()
+{
+	fetch "${1}" "${2}.sig" || true
+
+	if is_file "${RECOVERY_CACHE}/${2}" && is_file "${RECOVERY_CACHE}/${2}.sig"; then
+		if ! is_file "${2}.sig" || files_equal "${2}.sig" "${RECOVERY_CACHE}/${2}.sig"; then
+			info "Copying '${2}' from local storage"
+			xcp "${RECOVERY_CACHE}/${2}.sig" "${2}.sig"
+			xcp "${RECOVERY_CACHE}/${2}" "${2}"
+		fi
+	fi
+
+	is_file "${2}.sig" || abort "Failed to obtain signature '${2}.sig'"
+	is_file "${2}" && verify "${2}" || {
+		fetch "${1}" "${2}" || abort "Failed to download '${2}'"
+		verify "${2}" || abort 'Failed to verify signature'
+	}
+}
+
+safe_mount()
+{
+	local device="${1}"
+	local dir="${2}"
+	shift 2
+
+	if is_mounted "${device}" "${dir}"; then
+		info "Remounting '${device}' to '${dir}'"
+		mount -o remount $@ "${device}" "${dir}"
+	else
+		create_directory "${dir}"
+		info "Mounting '${device}' to '${dir}'"
+		mount $@ "${device}" "${dir}" && MOUNTPOINTS="${dir}:${MOUNTPOINTS}"
+	fi
+}
+
+unmount()
+{
+	if is_mountpoint "${1}"; then
+		info "Unmounting '${1}'"
+		umount "${1}" || mount -o remount,ro "${1}"
+	fi
+}
+
+mount_cache()
+{
+	if is_blockdev "${DATA_PARTITION}"; then
+		safe_mount "${DATA_PARTITION}" "${DATA_MOUNTPOINT}" -o ro || warn "Failed to mount data filesystem"
+	fi
+}
+
+cache_changed()
+{
+	is_empty_or_mountpoint "${DATA_MOUNTPOINT}" && ! cmp -s "${RECOVERY_CACHE}/${1}.sig" "${1}.sig" || ! verify "${RECOVERY_CACHE}/${1}" 4>/dev/null
+}
+
+remount_cache_rw()
+{
+	is_empty "${DATA_MOUNTPOINT}" || {
+		is_mountpoint "${DATA_MOUNTPOINT}" && info "Remounting '${DATA_MOUNTPOINT}' (rw)" && \
+			mount -o remount,rw "${DATA_MOUNTPOINT}" && is_writable "${DATA_MOUNTPOINT}"
+	}
+}
+
+update_cache()
+{
+	if [ -f "${1}" ] && remount_cache_rw; then
+		create_directory "${RECOVERY_CACHE}"
+		if is_directory "${RECOVERY_CACHE}"; then
+			info "Updating recovery cache (${1})"
+			xcp "${1}" "${RECOVERY_CACHE}/${1}" || true
+		fi
+	fi
+}
+
+update_cache_signed()
+{
+	if cache_changed "${1}" && remount_cache_rw; then
+		create_directory "${RECOVERY_CACHE}"
+		if is_directory "${RECOVERY_CACHE}"; then
+			info "Updating recovery cache (${1})"
+			xcp "${1}" "${RECOVERY_CACHE}/${1}" || true
+			xcp "${1}.sig" "${RECOVERY_CACHE}/${1}.sig" || true
+		fi
+	fi
+}
+
+unmount_cache()
+{
+	unmount "${DATA_MOUNTPOINT}"
+}
+
+run()
+{
+	local cmd="${1}"
+	shift
+
+	info "Running '${cmd}'"
+	is_empty "$@" || info "Options '$@'"
+	chmod 755 "${cmd}" || abort "Failed to set execute permissions"
+	${cmd} $@ || abort "Failed to execute '${cmd}'"
+}
+
+run_postinsts()
+{
+	local virtfs="dev proc run sys tmp"
+	local mountpoint=$1
+	shift
+
+	if [ -d "${mountpoint}/var/lib/dpkg/info" ]; then
+		pkgtype="dpkg"
+	elif [ -d "${mountpoint}/var/lib/opkg/info" ]; then
+		pkgtype="opkg"
+	else
+		warn "Unknown package manager, can't run postinst scripts"
+		return
+	fi
+
+	for fs in ${virtfs}; do
+		safe_mount /${fs} ${mountpoint}/${fs} -o bind || abort "Failed to mount ${mountpoint}/${fs}"
+	done
+	for package in $@; do
+		if [ -x "${mountpoint}/var/lib/${pkgtype}/info/${package}.postinst" ]; then
+			xchroot ${mountpoint} /var/lib/${pkgtype}/info/${package}.postinst || abort "Failed to run ${package}.postinst"
+		fi
+	done
+	for fs in ${virtfs}; do
+		unmount ${mountpoint}/${fs} || warn "Failed to unmount ${mountpoint}/${fs}"
+	done
+}
+
+assert_rescue_mode()
+{
+	is_initrd || is_nfsroot || abort "This script may only run in rescue mode!"
+}
+
+write_blkdev()
+{
+	info "Writing ${1} to ${2}"
+	xdd if=${1} of=${2} bs=64K
+}
+
+write_lba()
+{
+	info "Writing ${1} to ${2} (LBA: ${3})"
+	xdd if="${1}" of="${2}" bs=512 seek="${3}"
+}
+
+usage()
+{
+	echo "Usage: ${0} [-hqtv]"
+	exit ${1}
+}
+
+std_opt()
+{
+	case "${1}" in
+		q)
+			exec 3>/dev/null
+			exec 4>/dev/null
+			exec 5>/dev/null
+			;;
+		t)
+			set -x
+			;;
+		v)
+			exec 3>&1
+			exec 4>&2
+			exec 5>&1
+			;;
+		h|'?')
+			if [ "${1}" = "h" ]; then
+				usage 0
+			else
+				usage 1
+			fi
+			;;
+	esac
+}
+
+xcp()
+{
+	xtrap cp -a $@
+}
+
+xchroot()
+{
+	xtrap chroot $@
+}
+
+xdd()
+{
+	xtrap dd conv=fsync $@
+}
+
+xgetopts()
+{
+	local opt
+
+	while getopts hqtv opt; do
+		std_opt "${opt}"
+	done
+}
+
+xrealpath()
+{
+	local opt
+
+	if realpath -v >/dev/null 2>&1; then
+		opt="-s"
+	else
+		opt="-m"
+	fi
+
+	realpath ${opt} "${1}"
+}
+
+xtar_args()
+{
+	for arg; do
+		if ! tar "$arg" --help 2>&1 | grep -q "^tar: unrecognized option '$arg'$"; then
+			echo "$arg"
+		fi
+	done
+}
+
+xtar()
+{
+	xtrap tar $(xtar_args --numeric-owner --warning=no-timestamp) $@
+}
+
+xtrap()
+{
+	(trap '' HUP INT TERM; exec $@) >&3 2>&4
+}
+
+compatible()
+{
+	for m; do
+		[ "$m" != "${MACHINE}" ] || return 0
+	done
+
+	abort "Unimplemented command."
+}
+
+mark_legacy_version()
+{
+	${LEGACY} || warn "Please consider updating your rescue loader!"
+	LEGACY=:
+}
+
+is_legacy_version()
+{
+	${LEGACY}
+}
+
+root_password_remove()
+{
+	if [ -x "${ROOT_MOUNTPOINT}/usr/bin/passwd" ]; then
+		xchroot ${ROOT_MOUNTPOINT} /usr/bin/passwd -d root || abort "Failed to remove root password protection"
+		info "Root password protection removed."
+	fi
+}
+
+librecovery_init

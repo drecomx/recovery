@@ -1,0 +1,55 @@
+#!/bin/sh
+#
+# Copyright (C) 2020 Dream Property GmbH
+#
+
+source librecovery
+
+flash_uboot()
+{
+	local pkgdatadir="/usr/share/u-boot-bin/dream${MACHINE}"
+	if ! is_directory "${pkgdatadir}"; then
+		pkgdatadir="/usr/share/u-boot-bin"
+	fi
+	local uboot_bin="${pkgdatadir}/u-boot.bin"
+	local uboot_env="${pkgdatadir}/u-boot.env"
+
+	is_readable_file "${uboot_bin}" || abort "Cannot access '${uboot_bin}'"
+	is_readable_file "${uboot_env}" || abort "Cannot access '${uboot_env}'"
+
+	create_workspace
+	create_keyring "${RECOVERY_KEY}"
+	verify "${uboot_bin}"
+
+	is_file_size_le "${uboot_bin}" "${UBOOT_SIZE}" || abort "U-Boot image is too big"
+	is_writable_blockdev "${UBOOT_PARTITION}" || abort "Target device '${UBOOT_PARTITION}' is not writable"
+
+	source "${uboot_env}"
+
+	local new_hash=$(sha256sum "${uboot_bin}" | awk '{print $1}')
+	for size in ${UBOOT_KNOWN_SIZES}; do
+		local old_hash=$(dd "if=${UBOOT_PARTITION}" "bs=$((${size} + 512))" count=1 2>/dev/null | dd skip=1 2>/dev/null | sha256sum | awk '{print $1}')
+		if [ "${old_hash}" = "${new_hash}" ]; then
+			info "Skipping update of same version of U-Boot"
+			return
+		fi
+
+		local uboot_known_hashes="UBOOT_KNOWN_HASHES_${size}"
+		for known_hash in ${!uboot_known_hashes}; do
+			if [ "${old_hash}" = "${known_hash}" ]; then
+				info "Updating U-Boot"
+				write_lba "${uboot_bin}" "${UBOOT_PARTITION}" 1
+				return
+			fi
+		done
+	done
+
+	abort "Refusing to overwrite an unknown bootloader version"
+}
+
+xgetopts $@
+if [ -n "${UBOOT_PARTITION}" ]; then
+	flash_uboot
+else
+	info "Nothing to do"
+fi
