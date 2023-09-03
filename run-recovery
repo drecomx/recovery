@@ -1,11 +1,11 @@
 #!/bin/sh
 #
-# Copyright (C) 2016 Dream Property GmbH
+# Copyright (C) 2014 Dream Property GmbH
 #
 
 source librecovery
 
-BASE_URI=http://dreamboxupdate.com/download/recovery/${MACHINE}/release
+BASE_URI=http://dreamboxupdate.com/download/recovery/dm820/release
 FILENAME=recovery
 
 while getopts bhqrtv opt; do
@@ -13,7 +13,23 @@ while getopts bhqrtv opt; do
 done
 assert_rescue_mode
 create_workspace
-create_keyring "${RECOVERY_KEY}"
+
+export GNUPGHOME="${WORKSPACE}"
+
+(base64 -d > trustedkeys.gpg || abort 'Failed to write public key') << EOF
+mQENBFQ5xy0BCADyK6WY3xcKICfVFSbQQ+GXYK9k54bXJ4d2jNaSfk4yAU/YNo2d2ZNTvsN2fQTV
+2hwQb1yamJ9MDfqS46qio2rxTBpCNjWwn08ANrn5O52VVy/72xceuUl1XW+Hf0ANF2jtgLTzNpIT
+7uQBXxww7/3WSeoK6EP2xb7cbn5PHxtfv/b71wdq3nUYZWOzHOA4mfaRMZ61n37BkADiA8QJKKNN
+6xm4gDMTrAZF1QRC5xtVZ0xHgPRxjD2So3+s5Jf+BL+W5OfOeI8/S3VdHDmvLi30D6D3jAGQKYtu
+gnf6UaBBczoN5otwmeIOdHpxK4hSk8AY0C+umJdaDt6szELgGTq/ABEBAAG0LERyZWFtYm94IERN
+ODIwIFJlY292ZXJ5IDxyZWNvdmVyeUBkbTgyMC5jb20+iQE4BBMBAgAiBQJUOcctAhsDBgsJCAcD
+AgYVCAIJCgsEFgIDAQIeAQIXgAAKCRAmJQHXeeLAz2QdCACCxIcajDZ/Zl9V+jAubsCqPlh8Ep+v
+ECizcjF7YiG9br3HGZCD8SdKQGAYQmMLLlo10Jj91/v6OhqDtpTSU2LyebjJZ0JE5xiWjmA+4bPs
+tgOe+TmaNlQdT47V9whXx2+hKBYMpKtfv9TYhDoxBrQvaCguyVYDcqGyzslzjZonDeVIQQtLQjpR
+Bi/eLrrmV+0CiPZowfceX9SJEknomc/TrYDRgoZRoIhZh6WG/68h+kzHN9MYDLwxM9vgxifQ5/xe
+anMfDItZGZ+rtPKLq/yW6glOw//ctmngLwLO/wuyG7/yeJ98sj7bmO2SP52MvKmj6F8dag+m2V8/
+4n4KYl7KsAIAAw==
+EOF
 
 mount_cache
 fetch_signed "${BASE_URI}" "${FILENAME}"
