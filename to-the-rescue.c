@@ -1,8 +1,8 @@
 /*
  * to-the-rescue.c
  *
- * Copyright (C) 2019 Dream Property GmbH, Germany
- *                    https://dreambox.de/
+ * Copyright (C) 2016 Dream Property GmbH, Germany
+ *                    http://www.dream-multimedia-tv.de/
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,45 +53,37 @@ static bool aon(void)
 {
 	unsigned int chip_id;
 	unsigned long addr;
-	volatile int *array;
+	volatile long *array;
 	unsigned int index;
-	size_t size;
 
 	if (!detect_soc(&chip_id))
 		return false;
 
 	switch (chip_id) {
 	case 0x73625:
-		addr = BCM_PHYSICAL_OFFSET + AON_ARRAY_BCM73625;
+		addr = AON_ARRAY_BCM73625;
 		index = 120;
-		size = 0x1000;
 		break;
 	case 0x7439:
-		addr = BCM_PHYSICAL_OFFSET + AON_ARRAY_BCM7439;
+		addr = AON_ARRAY_BCM7439;
 		index = 244;
-		size = 0x1000;
-		break;
-	case 0x29400a02:
-		addr = 0xff6345e4;
-		index = 0;
-		size = 4;
 		break;
 	default:
 		return false;
 	}
 
-	array = ioremap(addr, size);
+	array = ioremap(BCM_PHYSICAL_OFFSET + addr, 0x1000);
 	if (array == NULL)
 		return false;
 
 	array[index] = 0x12E5C00E;
-	iounmap(array, size);
+	iounmap(array, 0x1000);
 	return true;
 }
 
 int main(void)
 {
-	char *argv[4];
+	char *argv[2];
 
 	if (!(proc() || aon())) {
 		printf("Sorry, manual intervention required! Please execute 'reboot' manually,\n"
@@ -99,14 +91,6 @@ int main(void)
 		       "Dreambox restarts, until the countdown on the front panel display has\n"
 		       "elapsed.\n");
 		return 1;
-	}
-
-	if (access("/bin/systemctl", X_OK) == 0) {
-		argv[0] = "systemctl";
-		argv[1] = "--no-block";
-		argv[2] = "reboot";
-		argv[3] = NULL;
-		return !!execve("/bin/systemctl", argv, NULL);
 	}
 
 	argv[0] = "reboot";

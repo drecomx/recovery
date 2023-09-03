@@ -1,9 +1,11 @@
+#!/bin/sh
 #
 # Copyright (C) 2016 Dream Property GmbH
 #
 
+BASE_URI=http://dreamboxupdate.com/download/recovery/dm900/release
+FILENAME=dreambox-image-dm900.tar.xz
 MMC_DEVICE=/dev/mmcblk0
-KERNEL_PARTITION=/dev/mmcblk0p1
 ROOT_PARTITION=/dev/mmcblk0p2
 ROOT_MOUNTPOINT=/mnt
 ROOT_NAME=dreambox-rootfs
@@ -21,21 +23,6 @@ set -e
 exec 3>/dev/null
 exec 4>&2
 exec 5>&1
-
-is_beneath_directory()
-{
-	local file=`xrealpath ${1}`
-	local dir=`xrealpath ${2}`
-
-	case "$file" in
-		$dir/*)
-			true
-			;;
-		*)
-			false
-			;;
-	esac
-}
 
 is_blockdev()
 {
@@ -62,11 +49,6 @@ is_readable()
 	[ -r "${1}" ]
 }
 
-is_readable_blockdev()
-{
-	is_blockdev "${1}" && is_readable "${1}"
-}
-
 is_readable_file()
 {
 	is_file "${1}" && is_readable "${1}"
@@ -87,19 +69,9 @@ is_writable_chardev()
 	is_chardev "${1}" && is_writable "${1}"
 }
 
-is_writable_directory()
-{
-	is_directory "${1}" && is_writable "${1}"
-}
-
 is_empty()
 {
 	[ -z "${1}" ]
-}
-
-is_file_size_le()
-{
-	[ "`stat -c '%s' ${1}`" -le "${2}" ]
 }
 
 is_initrd()
@@ -184,12 +156,6 @@ erase()
 	xtrap flash_erase "${1}" 0 0
 }
 
-write_nand()
-{
-	info "Writing to NAND memory on ${1}"
-	xtrap nandwrite -p -m "${1}" "${2}"
-}
-
 format_ubi_device()
 {
 	info "Formatting ${1} for UBI"
@@ -223,66 +189,6 @@ create_partition_table()
 		-n 3:2097152: -c 3:data -t 3:8300 "${1}"
 }
 
-create_tarball()
-{
-	local sysroot="${1}"
-	local tarball="${2}"
-	local opt
-
-	case "${tarball}" in
-		*.tar)
-			opt=""
-			;;
-		*.gz|*.tgz|*.taz)
-			opt="-z"
-			;;
-		*.Z|*.taZ)
-			opt="-Z"
-			;;
-		*.bz2|*.tbz|*.tbz2|*.tz2)
-			opt="-j"
-			;;
-		*.lz)
-			opt="--lzip"
-			;;
-		*.lzma|*.tlz)
-			opt="--lzma"
-			;;
-		*.lzo)
-			opt="--lzop"
-			;;
-		*.xz|*.txz)
-			opt="-J"
-			;;
-		*)
-			abort "Invalid file type: ${tarball}"
-			;;
-	esac
-
-	create_directory "`dirname ${tarball}`"
-
-	echo "${WORKSPACE:1}" >exclude.list
-	(cd "${sysroot}" && find . -type s) >>exclude.list
-
-	if [ $# -gt 2 ]; then
-		printf "" >include.list
-		IFS=$'\n'
-		set -- ${3}
-		unset IFS
-		for path; do
-			if [ -e "${sysroot}${path}" ]; then
-				echo "${path:1}" >>include.list
-			fi
-		done
-	else
-		echo "." >include.list
-	fi
-
-	info "Creating ${tarball} from ${sysroot}"
-	xtar -C "${sysroot}" ${opt} --exclude-from=exclude.list --files-from=include.list -cf "${tarball}.tmp"
-	mv "${tarball}.tmp" "${tarball}"
-}
-
 create_workspace()
 {
 	umask 077
@@ -294,12 +200,8 @@ create_workspace()
 
 extract_tarball()
 {
-	local tarball="${1}"
-	local dir="${2}"
-	shift 2
-
-	info "Extracting '${tarball}' to '${dir}'"
-	xtar -xf "${tarball}" -C "${dir}" $@
+	info "Extracting '${1}' to '${2}'"
+	xtar -xf "${1}" -C "${2}"
 }
 
 fetch()
@@ -408,17 +310,6 @@ unmount_cache()
 	unmount "${DATA_MOUNTPOINT}"
 }
 
-run()
-{
-	local cmd="${1}"
-	shift
-
-	info "Running '${cmd}'"
-	is_empty "$@" || info "Options '$@'"
-	chmod 755 "${cmd}" || abort "Failed to set execute permissions"
-	${cmd} $@ || abort "Failed to execute '${cmd}'"
-}
-
 run_postinsts()
 {
 	local virtfs="dev proc run sys tmp"
@@ -452,27 +343,9 @@ assert_rescue_mode()
 	is_initrd || is_nfsroot || abort "This script may only run in rescue mode!"
 }
 
-write_blkdev()
-{
-	info "Writing ${1} to ${2}"
-	xdd if=${1} of=${2} bs=64K
-}
-
-write_lba()
-{
-	info "Writing ${1} to ${2} (LBA: ${3})"
-	xdd if="${1}" of="${2}" bs=512 seek="${3}"
-}
-
-select_boot_source()
-{
-	info "Enabling boot source ${2}"
-	printf "opt${2}\0" | xdd of=${1} bs=512 seek=64
-}
-
 usage()
 {
-	echo "Usage: ${0} [-hqtv]"
+	echo "Usage: ${0} [-bhqrtv]"
 	exit ${1}
 }
 
@@ -517,15 +390,6 @@ xdd()
 	xtrap dd conv=fsync $@
 }
 
-xgetopts()
-{
-	local opt
-
-	while getopts hqtv opt; do
-		std_opt "${opt}"
-	done
-}
-
 xrealpath()
 {
 	local opt
@@ -556,3 +420,77 @@ xtrap()
 {
 	(trap '' HUP INT TERM; exec $@) >&3 2>&4
 }
+
+BACKUP_SETTINGS=":"
+RESTORE_SETTINGS=":"
+SETTINGS="settings.tar.gz"
+
+while getopts bhqrtv opt; do
+	case "${opt}" in
+		b)
+			BACKUP_SETTINGS="backup-settings ${SETTINGS}"
+			;;
+		r)
+			RESTORE_SETTINGS="restore-settings ${SETTINGS}"
+			;;
+	esac
+	std_opt "${opt}"
+done
+
+assert_rescue_mode
+
+is_writable_blockdev "${MMC_DEVICE}" || abort "Target block device '${MMC_DEVICE}' is not a writable block device"
+
+create_workspace
+export GNUPGHOME="${WORKSPACE}"
+
+(base64 -d > trustedkeys.gpg || abort 'Failed to write public key') << EOF
+mQENBFfS0TQBCADLP/mDLWiIF/dJmVFVzQf9CJ7jtb5ilVf4SOasXkPEbdtDsvIIE8ShAHPUgmYC
+YGAl5FJNxaPZMhyylC9BZOLeYdUgJVRJXjY2WX/bE/6/J5z9UWj+XPzbnbxC+ZnzOGwyUAiHtwbF
+YLH0SnCN6LEl+nqgwRwpKBgFp64YyAAJ/Rpj5tK6T9v5QuN5CK/UcClmLSqlC/KSbjf93+W9AyOM
+9F/apxNnhWyEPPjEQbJV8G1WTDL12j4NER3CwwGr+WlKidNdtqDZYYMx89p/qLoV0kbk8tOB7Szx
+STFQIpetPi++WlKduS5K1gmVYSU8v9WdSAIDujbH1lqOtBq6AaIFABEBAAG0NERyZWFtYm94IERN
+OTAwIFJlY292ZXJ5IDxkbTkwMEByZWNvdmVyeS5kcmVhbWJveC5kZT6JATgEEwECACIFAlfS0TQC
+GwMGCwkIBwMCBhUIAgkKCwQWAgMBAh4BAheAAAoJEPAqD3Z9onVhi9YIALa4eA9XRbyNT/kz2fj9
+gJ9aLfoxPACbkc2pxwVmLtqeCvsgzEvG62QkFwfL+HDQy2G3YgOSYM8/Z1Y8Agp0iS/QNzNE9v7u
+cniOy7bX+L+M/zZtLnmY4ixIWcPdMraipjaH3v1c9SUg4eeN6WRgQnPmDA2w+PBViXoAAuqKQrG/
+7DrGLzXiUzRgxoub4hm1au6KSnEgthn7O33dtCKRDwlCFDHNqdOpgayfGKZ+ENrP5FPZIuSmJH+Z
+GWxsi2P4cmVwsSE0i1REX3pk1xd4lefdmminxhgsrHnlh4q5O6fSrSlIfNKZ3SZZ3KeSCB21g/9L
+5jAezlvBvp2M0qC2EDQ=
+EOF
+
+mount_cache
+fetch_signed "${BASE_URI}" "${FILENAME}"
+
+[ ! -f "${RECOVERY_CACHE}/settings.tar.gz" ] || cp ${RECOVERY_CACHE}/settings.tar.gz ${SETTINGS}
+if blkdev_has_filesystem "${ROOT_PARTITION}"; then
+	${BACKUP_SETTINGS}
+fi
+[ "${RESTORE_SETTINGS}" = ":" -o -f "${SETTINGS}" ] || abort "Can't restore settings without prior backup!"
+
+if ! is_blockdev "${ROOT_PARTITION}" || ! blkdev_has_filesystem "${DATA_PARTITION}"; then
+	unmount "${ROOT_MOUNTPOINT}" || abort "Failed to unmount root filesystem"
+	unmount "${DATA_MOUNTPOINT}" || abort "Failed to unmount data filesystem"
+	if ! is_blockdev "${ROOT_PARTITION}" || ! is_blockdev "${DATA_PARTITION}"; then
+		create_partition_table "${MMC_DEVICE}" || abort "Failed to partition disk"
+	fi
+	if ! blkdev_has_filesystem "${DATA_PARTITION}"; then
+		create_filesystem "${DATA_NAME}" "${DATA_PARTITION}" || warn "Failed to create ${FILESYSTEM} filesystem '${DATA_NAME}' on '${DATA_PARTITION}'"
+	fi
+	mount_cache
+fi
+
+unmount "${ROOT_MOUNTPOINT}" || abort "Failed to unmount root filesystem"
+create_filesystem "${ROOT_NAME}" "${ROOT_PARTITION}" || abort "Failed to create ${FILESYSTEM} filesystem '${ROOT_NAME}' on '${ROOT_PARTITION}'"
+safe_mount "${ROOT_PARTITION}" "${ROOT_MOUNTPOINT}" || abort "Failed to mount root filesystem"
+extract_tarball "${FILENAME}" "${ROOT_MOUNTPOINT}" || abort "Failed to extract root filesystem"
+run_postinsts "${ROOT_MOUNTPOINT}" kernel-image || abort "Failed to run postinst scripts"
+${RESTORE_SETTINGS}
+unmount "${ROOT_MOUNTPOINT}" || warn "Failed to unmount root filesystem"
+
+[ "${BACKUP_SETTINGS}" = ":" ] || update_cache "${SETTINGS}"
+update_cache_signed "${FILENAME}"
+unmount_cache
+
+info "Initiating reboot"
+sync && reboot || warn 'Failed to initiate reboot'
