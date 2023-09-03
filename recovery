@@ -1,7 +1,10 @@
+#!/bin/sh
 #
 # Copyright (C) 2016 Dream Property GmbH
 #
 
+BASE_URI=http://dreamboxupdate.com/download/recovery/dm7080/release
+FILENAME=dreambox-image-dm7080.tar.xz
 MMC_DEVICE=/dev/mmcblk0
 ROOT_PARTITION=/dev/mmcblk0p1
 ROOT_MOUNTPOINT=/mnt
@@ -20,21 +23,6 @@ set -e
 exec 3>/dev/null
 exec 4>&2
 exec 5>&1
-
-is_beneath_directory()
-{
-	local file=`xrealpath ${1}`
-	local dir=`xrealpath ${2}`
-
-	case "$file" in
-		$dir/*)
-			true
-			;;
-		*)
-			false
-			;;
-	esac
-}
 
 is_blockdev()
 {
@@ -61,11 +49,6 @@ is_readable()
 	[ -r "${1}" ]
 }
 
-is_readable_blockdev()
-{
-	is_blockdev "${1}" && is_readable "${1}"
-}
-
 is_readable_file()
 {
 	is_file "${1}" && is_readable "${1}"
@@ -86,19 +69,9 @@ is_writable_chardev()
 	is_chardev "${1}" && is_writable "${1}"
 }
 
-is_writable_directory()
-{
-	is_directory "${1}" && is_writable "${1}"
-}
-
 is_empty()
 {
 	[ -z "${1}" ]
-}
-
-is_file_size_le()
-{
-	[ "`stat -c '%s' ${1}`" -le "${2}" ]
 }
 
 is_initrd()
@@ -168,7 +141,14 @@ create_filesystem()
 
 blkdev_has_filesystem()
 {
-	is_blockdev "${1}" && blkid -o export "${1}" | grep -q "^TYPE=${FILESYSTEM}$"
+	is_blockdev "${1}" && (
+		if hash blkid 2>/dev/null; then
+			blkid -o export "${1}" | grep -q "^TYPE=${FILESYSTEM}$"
+		else
+			local dir=`mktemp -d -p ${WORKSPACE}` || abort 'Failed to create temporary mount point'
+			grep -q "^${1}\s[^\s]\+\s${FILESYSTEM}\s" /proc/mounts || (mount -t ${FILESYSTEM} -o ro "${1}" "${dir}" 2>/dev/null && umount "${dir}")
+		fi
+	)
 }
 
 create_nand_filesystem()
@@ -181,12 +161,6 @@ erase()
 {
 	info "Erasing flash memory on ${1}"
 	xtrap flash_erase "${1}" 0 0
-}
-
-write_nand()
-{
-	info "Writing to NAND memory on ${1}"
-	xtrap nandwrite -p -m "${1}" "${2}"
 }
 
 format_ubi_device()
@@ -216,69 +190,16 @@ create_ubi_volume()
 create_partition_table()
 {
 	info "Creating partition table"
-	xtrap sgdisk -z \
-		-n 1:147456:2097151 -c 1:rootfs -t 1:8307 \
-		-n 2:2097152: -c 2:data -t 2:8300 "${1}"
-}
-
-create_tarball()
-{
-	local sysroot="${1}"
-	local tarball="${2}"
-	local opt
-
-	case "${tarball}" in
-		*.tar)
-			opt=""
-			;;
-		*.gz|*.tgz|*.taz)
-			opt="-z"
-			;;
-		*.Z|*.taZ)
-			opt="-Z"
-			;;
-		*.bz2|*.tbz|*.tbz2|*.tz2)
-			opt="-j"
-			;;
-		*.lz)
-			opt="--lzip"
-			;;
-		*.lzma|*.tlz)
-			opt="--lzma"
-			;;
-		*.lzo)
-			opt="--lzop"
-			;;
-		*.xz|*.txz)
-			opt="-J"
-			;;
-		*)
-			abort "Invalid file type: ${tarball}"
-			;;
-	esac
-
-	create_directory "`dirname ${tarball}`"
-
-	echo "${WORKSPACE:1}" >exclude.list
-	(cd "${sysroot}" && find . -type s) >>exclude.list
-
-	if [ $# -gt 2 ]; then
-		printf "" >include.list
-		IFS=$'\n'
-		set -- ${3}
-		unset IFS
-		for path; do
-			if [ -e "${sysroot}${path}" ]; then
-				echo "${path:1}" >>include.list
-			fi
-		done
+	if hash sgdisk 2>/dev/null; then
+		xtrap sgdisk -z \
+			-n 1:147456:2097151 -c 1:rootfs -t 1:8307 \
+			-n 2:2097152: -c 2:data -t 2:8300 "${1}"
 	else
-		echo "." >include.list
+		xtrap parted --script --align=optimal "${1}" -- \
+			mklabel gpt \
+			mkpart primary ext2 72MiB 1GiB \
+			mkpart primary ext2 1GiB 100% >&3 2>&4
 	fi
-
-	info "Creating ${tarball} from ${sysroot}"
-	xtar -C "${sysroot}" ${opt} --exclude-from=exclude.list --files-from=include.list -cf "${tarball}.tmp"
-	mv "${tarball}.tmp" "${tarball}"
 }
 
 create_workspace()
@@ -292,12 +213,8 @@ create_workspace()
 
 extract_tarball()
 {
-	local tarball="${1}"
-	local dir="${2}"
-	shift 2
-
-	info "Extracting '${tarball}' to '${dir}'"
-	xtar -xf "${tarball}" -C "${dir}" $@
+	info "Extracting '${1}' to '${2}'"
+	xtar -xf "${1}" -C "${2}"
 }
 
 fetch()
@@ -406,17 +323,6 @@ unmount_cache()
 	unmount "${DATA_MOUNTPOINT}"
 }
 
-run()
-{
-	local cmd="${1}"
-	shift
-
-	info "Running '${cmd}'"
-	is_empty "$@" || info "Options '$@'"
-	chmod 755 "${cmd}" || abort "Failed to set execute permissions"
-	${cmd} $@ || abort "Failed to execute '${cmd}'"
-}
-
 run_postinsts()
 {
 	local virtfs="dev proc run sys tmp"
@@ -450,27 +356,9 @@ assert_rescue_mode()
 	is_initrd || is_nfsroot || abort "This script may only run in rescue mode!"
 }
 
-write_blkdev()
-{
-	info "Writing ${1} to ${2}"
-	xdd if=${1} of=${2} bs=64K
-}
-
-write_lba()
-{
-	info "Writing ${1} to ${2} (LBA: ${3})"
-	xdd if="${1}" of="${2}" bs=512 seek="${3}"
-}
-
-select_boot_source()
-{
-	info "Enabling boot source ${2}"
-	printf "opt${2}\0" | xdd of=${1} bs=512 seek=64
-}
-
 usage()
 {
-	echo "Usage: ${0} [-hqtv]"
+	echo "Usage: ${0} [-bhqrtv]"
 	exit ${1}
 }
 
@@ -515,15 +403,6 @@ xdd()
 	xtrap dd conv=fsync $@
 }
 
-xgetopts()
-{
-	local opt
-
-	while getopts hqtv opt; do
-		std_opt "${opt}"
-	done
-}
-
 xrealpath()
 {
 	local opt
@@ -554,3 +433,77 @@ xtrap()
 {
 	(trap '' HUP INT TERM; exec $@) >&3 2>&4
 }
+
+BACKUP_SETTINGS=":"
+RESTORE_SETTINGS=":"
+SETTINGS="settings.tar.gz"
+
+while getopts bhqrtv opt; do
+	case "${opt}" in
+		b)
+			BACKUP_SETTINGS="backup-settings ${SETTINGS}"
+			;;
+		r)
+			RESTORE_SETTINGS="restore-settings ${SETTINGS}"
+			;;
+	esac
+	std_opt "${opt}"
+done
+
+assert_rescue_mode
+
+is_writable_blockdev "${MMC_DEVICE}" || abort "Target block device '${MMC_DEVICE}' is not a writable block device"
+
+create_workspace
+export GNUPGHOME="${WORKSPACE}"
+
+(base64 -d > trustedkeys.gpg || abort 'Failed to write public key') << EOF
+mQENBFPo2oUBCAC6dzqe5azBCkxzj99xNfzwB4L6tHzz83zqD2KUQuuJMhO7Q2g9AHnSNQ0z1+Bz
+oX2gGX90FusBSLiCuZmNdnxlcl7KVfBe37EpYtQNGCZKlWeruCAUdJGKIyPJXDvkXCy3dj6z1ho8
+p1r3uazEbUbJyLvwjzcg0Ua1qxFjLoq/h15yDgd0NCkMStL6gwKdmReLRfE/tn0K53CVQzIeEFyn
+EW3N0tu2deiYkanHy/MM9IOIv3oQmoEWNaVsDf+gG7nUPj0QE66GOYlBugR5vNi3BorOctarQp/8
+Dh56muiqomwwewJubzsvjUjpiYXdO/3RN2gOej2+5hUCiYmvOahfABEBAAG0LkRyZWFtYm94IERN
+NzA4MCBSZWNvdmVyeSA8cmVjb3ZlcnlAZG03MDgwLmNvbT6JATgEEwECACIFAlPo2oUCGwMGCwkI
+BwMCBhUIAgkKCwQWAgMBAh4BAheAAAoJEBWob67Wz1bnUGYH/0zmTS7Gtvv97oHHnz3JSkLybDRj
+Jx/wH+vpzyCRl8rC7TlHs5GBfjoJ1Hjo4DsZqElTb8g+kg5WGzMBUUuwabRhZuf2CL7/IPKP+LWH
+t2ByZX3OgS1Q+HDLob5wlKllD9y/wwekuwS/8cgdnDH9URHCBqIt5gWQzLU1pvmQrKPXM1aMsLQj
+16vbktXNkREF/cNhWfQFQs2dOwmzNEDeuE32I6h7PYl1bFP0hCOmbkcTuibnC+tsWOJMKF1iZ8bq
+xDND9BYTwGtD2SVrddu3i4kBz6hka01ZnfSUZewpu+TrCgaD6oENfarPiC9VYfKEFi10RIPIxwRX
+s1tBOOQNKpywAgAD
+EOF
+
+mount_cache
+fetch_signed "${BASE_URI}" "${FILENAME}"
+
+[ ! -f "${RECOVERY_CACHE}/settings.tar.gz" ] || cp ${RECOVERY_CACHE}/settings.tar.gz ${SETTINGS}
+if blkdev_has_filesystem "${ROOT_PARTITION}"; then
+	${BACKUP_SETTINGS}
+fi
+[ "${RESTORE_SETTINGS}" = ":" -o -f "${SETTINGS}" ] || abort "Can't restore settings without prior backup!"
+
+if ! is_blockdev "${ROOT_PARTITION}" || ! blkdev_has_filesystem "${DATA_PARTITION}"; then
+	unmount "${ROOT_MOUNTPOINT}" || abort "Failed to unmount root filesystem"
+	unmount "${DATA_MOUNTPOINT}" || abort "Failed to unmount data filesystem"
+	if ! is_blockdev "${ROOT_PARTITION}" || ! is_blockdev "${DATA_PARTITION}"; then
+		create_partition_table "${MMC_DEVICE}" || abort "Failed to partition disk"
+	fi
+	if ! blkdev_has_filesystem "${DATA_PARTITION}"; then
+		create_filesystem "${DATA_NAME}" "${DATA_PARTITION}" || warn "Failed to create ${FILESYSTEM} filesystem '${DATA_NAME}' on '${DATA_PARTITION}'"
+	fi
+	mount_cache
+fi
+
+unmount "${ROOT_MOUNTPOINT}" || abort "Failed to unmount root filesystem"
+create_filesystem "${ROOT_NAME}" "${ROOT_PARTITION}" || abort "Failed to create ${FILESYSTEM} filesystem '${ROOT_NAME}' on '${ROOT_PARTITION}'"
+safe_mount "${ROOT_PARTITION}" "${ROOT_MOUNTPOINT}" || abort "Failed to mount root filesystem"
+extract_tarball "${FILENAME}" "${ROOT_MOUNTPOINT}" || abort "Failed to extract root filesystem"
+run_postinsts "${ROOT_MOUNTPOINT}" dreambox-secondstage kernel-image || abort "Failed to run postinst scripts"
+${RESTORE_SETTINGS}
+unmount "${ROOT_MOUNTPOINT}" || warn "Failed to unmount root filesystem"
+
+[ "${BACKUP_SETTINGS}" = ":" ] || update_cache "${SETTINGS}"
+update_cache_signed "${FILENAME}"
+unmount_cache
+
+info "Initiating reboot"
+sync && reboot || warn 'Failed to initiate reboot'
