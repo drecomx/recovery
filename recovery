@@ -1,7 +1,10 @@
+#!/bin/sh
 #
 # Copyright (C) 2016 Dream Property GmbH
 #
 
+BASE_URI=http://dreamboxupdate.com/download/recovery/dm520/release
+FILENAME=dreambox-image-dm520.tar.xz
 MTD_DEVICE=/dev/mtd0
 UBI_ID=0
 UBI_DEVICE=/dev/ubi${UBI_ID}
@@ -23,21 +26,6 @@ set -e
 exec 3>/dev/null
 exec 4>&2
 exec 5>&1
-
-is_beneath_directory()
-{
-	local file=`xrealpath ${1}`
-	local dir=`xrealpath ${2}`
-
-	case "$file" in
-		$dir/*)
-			true
-			;;
-		*)
-			false
-			;;
-	esac
-}
 
 is_blockdev()
 {
@@ -64,11 +52,6 @@ is_readable()
 	[ -r "${1}" ]
 }
 
-is_readable_blockdev()
-{
-	is_blockdev "${1}" && is_readable "${1}"
-}
-
 is_readable_file()
 {
 	is_file "${1}" && is_readable "${1}"
@@ -89,19 +72,9 @@ is_writable_chardev()
 	is_chardev "${1}" && is_writable "${1}"
 }
 
-is_writable_directory()
-{
-	is_directory "${1}" && is_writable "${1}"
-}
-
 is_empty()
 {
 	[ -z "${1}" ]
-}
-
-is_file_size_le()
-{
-	[ "`stat -c '%s' ${1}`" -le "${2}" ]
 }
 
 is_initrd()
@@ -186,12 +159,6 @@ erase()
 	xtrap flash_erase "${1}" 0 0
 }
 
-write_nand()
-{
-	info "Writing to NAND memory on ${1}"
-	xtrap nandwrite -p -m "${1}" "${2}"
-}
-
 format_ubi_device()
 {
 	info "Formatting ${1} for UBI"
@@ -216,66 +183,6 @@ create_ubi_volume()
 	xtrap ubimkvol "${UBI_DEVICE}" -n "${UBI_VOL_ID}" -N "${ROOT_NAME}" -m
 }
 
-create_tarball()
-{
-	local sysroot="${1}"
-	local tarball="${2}"
-	local opt
-
-	case "${tarball}" in
-		*.tar)
-			opt=""
-			;;
-		*.gz|*.tgz|*.taz)
-			opt="-z"
-			;;
-		*.Z|*.taZ)
-			opt="-Z"
-			;;
-		*.bz2|*.tbz|*.tbz2|*.tz2)
-			opt="-j"
-			;;
-		*.lz)
-			opt="--lzip"
-			;;
-		*.lzma|*.tlz)
-			opt="--lzma"
-			;;
-		*.lzo)
-			opt="--lzop"
-			;;
-		*.xz|*.txz)
-			opt="-J"
-			;;
-		*)
-			abort "Invalid file type: ${tarball}"
-			;;
-	esac
-
-	create_directory "`dirname ${tarball}`"
-
-	echo "${WORKSPACE:1}" >exclude.list
-	(cd "${sysroot}" && find . -type s) >>exclude.list
-
-	if [ $# -gt 2 ]; then
-		printf "" >include.list
-		IFS=$'\n'
-		set -- ${3}
-		unset IFS
-		for path; do
-			if [ -e "${sysroot}${path}" ]; then
-				echo "${path:1}" >>include.list
-			fi
-		done
-	else
-		echo "." >include.list
-	fi
-
-	info "Creating ${tarball} from ${sysroot}"
-	xtar -C "${sysroot}" ${opt} --exclude-from=exclude.list --files-from=include.list -cf "${tarball}.tmp"
-	mv "${tarball}.tmp" "${tarball}"
-}
-
 create_workspace()
 {
 	umask 077
@@ -287,12 +194,8 @@ create_workspace()
 
 extract_tarball()
 {
-	local tarball="${1}"
-	local dir="${2}"
-	shift 2
-
-	info "Extracting '${tarball}' to '${dir}'"
-	xtar -xf "${tarball}" -C "${dir}" $@
+	info "Extracting '${1}' to '${2}'"
+	xtar -xf "${1}" -C "${2}"
 }
 
 fetch()
@@ -401,17 +304,6 @@ unmount_cache()
 	unmount "${DATA_MOUNTPOINT}"
 }
 
-run()
-{
-	local cmd="${1}"
-	shift
-
-	info "Running '${cmd}'"
-	is_empty "$@" || info "Options '$@'"
-	chmod 755 "${cmd}" || abort "Failed to set execute permissions"
-	${cmd} $@ || abort "Failed to execute '${cmd}'"
-}
-
 run_postinsts()
 {
 	local virtfs="dev proc run sys tmp"
@@ -445,27 +337,9 @@ assert_rescue_mode()
 	is_initrd || is_nfsroot || abort "This script may only run in rescue mode!"
 }
 
-write_blkdev()
-{
-	info "Writing ${1} to ${2}"
-	xdd if=${1} of=${2} bs=64K
-}
-
-write_lba()
-{
-	info "Writing ${1} to ${2} (LBA: ${3})"
-	xdd if="${1}" of="${2}" bs=512 seek="${3}"
-}
-
-select_boot_source()
-{
-	info "Enabling boot source ${2}"
-	printf "opt${2}\0" | xdd of=${1} bs=512 seek=64
-}
-
 usage()
 {
-	echo "Usage: ${0} [-hqtv]"
+	echo "Usage: ${0} [-bhqrtv]"
 	exit ${1}
 }
 
@@ -510,15 +384,6 @@ xdd()
 	xtrap dd conv=fsync $@
 }
 
-xgetopts()
-{
-	local opt
-
-	while getopts hqtv opt; do
-		std_opt "${opt}"
-	done
-}
-
 xrealpath()
 {
 	local opt
@@ -549,3 +414,77 @@ xtrap()
 {
 	(trap '' HUP INT TERM; exec $@) >&3 2>&4
 }
+
+BACKUP_SETTINGS=":"
+RESTORE_SETTINGS=":"
+SETTINGS="settings.tar.gz"
+
+while getopts bhqrtv opt; do
+	case "${opt}" in
+		b)
+			BACKUP_SETTINGS="backup-settings ${SETTINGS}"
+			;;
+		r)
+			RESTORE_SETTINGS="restore-settings ${SETTINGS}"
+			;;
+	esac
+	std_opt "${opt}"
+done
+
+assert_rescue_mode
+
+is_writable_chardev "${MTD_DEVICE}" || abort "Target device '${MTD_DEVICE}' is not a writable character device"
+
+create_workspace
+export GNUPGHOME="${WORKSPACE}"
+
+(base64 -d > trustedkeys.gpg || abort 'Failed to write public key') << EOF
+mQENBFcLsf0BCADDo4SxnQwl16cWSYnTwwp+E6ZvdhY3x9yw7b//MUDELtKkEp7wZ+AtHDYd+jzJ
+Syc+n1m4MkArNUzCdseFJJAYEsNEjZ6ZkoMSQ/GZsIKi2IYT0LXN+9c2ZLLZstNZ2201KwqjFkpE
+GXSn7VeLAvm82UgMaECY+4vJ5K3XtsLX6onCfidKy4qI8si4CTLylkDegGQ035FlkzqMKA8flafd
+RGiEWO/2o2ZdYgdjOYQq6W2MaI6zgDzg1V2HMXSweIxnhn8W4iZF80nLTPihoe+p3FRKX0d2G4B0
+wM49BTgfOgdcu3d3xZBRndOUXq0biga814jYLm3o+DqCmfmt3fsVABEBAAG0NERyZWFtYm94IERN
+NTIwIFJlY292ZXJ5IDxkbTUyMEByZWNvdmVyeS5kcmVhbWJveC5kZT6JATgEEwECACIFAlcLsf0C
+GwMGCwkIBwMCBhUIAgkKCwQWAgMBAh4BAheAAAoJENzmv7ygdoPTTw0IAIN+WQMjAQGbSEo6DP41
+U8g3u3gRVxBWpAPeE8wsq3wMjmDK4kcCohnWzJSqb7O4XFDUO0fsg0InojpYCIvfhSK+7eohwIaJ
+ilkdM37nUY7TioFY3pOx63ZzDAJ5SsirU26CIxB+hHWueaS/XsGinodzxl6H9/l8I33U/2DN1oUe
+y9JcHVNxdBRtSNZMYyZXlA+4LrkDDN6/c6kpIG2uZEYOH0WlP+Mqu9G81yYYKiK9MTlsYHcCoSlV
+XR8VVsVBxKkfSsoWLMkhE7aEFqq+FeVjcrRyc7R+QGhdzwq9gK50iXpr+YxfHJNn2FML185NGwyp
+Gnvzh5YpHKnihOS+J7c=
+EOF
+
+mount_cache
+fetch_signed "${BASE_URI}" "${FILENAME}"
+
+if ! is_chardev "${UBI_DEVICE}" && ! attach_ubi_device "${MTD_DEVICE}"; then
+	erase "${MTD_DEVICE}" || abort "Failed to erase ${MTD_DEVICE}"
+	format_ubi_device "${MTD_DEVICE}" || abort "Failed to format ${MTD_DEVICE}"
+	attach_ubi_device "${MTD_DEVICE}" || abort "Failed to attach ${MTD_DEVICE} to UBI"
+fi
+
+[ ! -f "${RECOVERY_CACHE}/settings.tar.gz" ] || cp ${RECOVERY_CACHE}/settings.tar.gz ${SETTINGS}
+if is_chardev "${ROOT_PARTITION}"; then
+	${BACKUP_SETTINGS}
+fi
+[ "${RESTORE_SETTINGS}" = ":" -o -f "${SETTINGS}" ] || abort "Can't restore settings without prior backup!"
+
+if is_chardev "${ROOT_PARTITION}"; then
+	unmount "${ROOT_MOUNTPOINT}" || abort "Failed to unmount root filesystem"
+	remove_ubi_volume || abort "Failed to remove UBI volume"
+fi
+
+create_ubi_volume || abort "Failed to create UBI volume"
+udevadm settle
+create_nand_filesystem "${ROOT_PARTITION}" || abort "Failed to create ${FILESYSTEM} filesystem on '${ROOT_PARTITION}'"
+safe_mount "${ROOT_PARTITION}" "${ROOT_MOUNTPOINT}" || abort "Failed to mount root filesystem"
+extract_tarball "${FILENAME}" "${ROOT_MOUNTPOINT}" || abort "Failed to extract root filesystem"
+run_postinsts "${ROOT_MOUNTPOINT}" dreambox-secondstage kernel-image || abort "Failed to run postinst scripts"
+${RESTORE_SETTINGS}
+unmount "${ROOT_MOUNTPOINT}" || warn "Failed to unmount root filesystem"
+
+[ "${BACKUP_SETTINGS}" = ":" ] || update_cache "${SETTINGS}"
+update_cache_signed "${FILENAME}"
+unmount_cache
+
+info "Initiating reboot"
+sync && reboot || warn 'Failed to initiate reboot'

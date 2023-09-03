@@ -7,7 +7,7 @@ source librecovery
 
 usage()
 {
-	echo "Usage: ${0} [-hqtv] <vmlinuz-rescue.bin>"
+	echo "Usage: ${0} [-hqtv] <ssbl.bin>"
 	exit ${1}
 }
 
@@ -16,6 +16,6 @@ shift $((${OPTIND} - 1))
 [ "$#" -eq 1 ] || usage 1
 FILENAME=`xrealpath ${1}`
 
-! is_empty "${FILENAME}" || abort "No rescue image given"
+! is_empty "${FILENAME}" || abort "No bootloader image given"
 is_readable_file "${FILENAME}" || abort "Cannot access '${FILENAME}'"
-writespi ${FILENAME} kernel || abort "Failed to write rescue image"
+writespi ${FILENAME} ssbl || abort "Failed to write bootloader image"
